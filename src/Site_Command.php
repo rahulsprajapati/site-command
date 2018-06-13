@@ -463,7 +463,6 @@ class Site_Command extends EE_Command {
 		try {
 			EE::log( 'Pulling latest images. This may take some time.' );
 			chdir( $this->site_root );
-			\EE\Utils\default_launch( 'docker-compose pull' );
 			EE::log( 'Starting site\'s services.' );
 			if ( ! $this->docker::docker_compose_up( $this->site_root ) ) {
 				throw new Exception( 'There was some error in docker-compose up.' );
@@ -521,7 +520,7 @@ class Site_Command extends EE_Command {
 		}
 
 		if ( is_dir( $this->site_root ) ) {
-			if ( ! \EE\Utils\default_launch( "sudo rm -rf $this->site_root" ) ) {
+			if ( ! \EE\Utils\default_launch( "rm -rf $this->site_root" ) ) {
 				EE::error( 'Could not remove site root. Please check if you have sufficient rights.' );
 			}
 			EE::log( "[$this->site_name] site root removed." );
