@@ -70,9 +70,9 @@ class Site_Command {
 
 		if ( isset( $assoc_args['type'] ) ) {
 			$type = $assoc_args['type'];
-//			if( ! ( ! empty( $args ) && 'update' == $args[0] ) ) {
+			if( ! ( ! empty( $args ) && 'update' == $args[0] ) ) {
 				unset( $assoc_args['type'] );
-//			}
+			}
 		} else {
 			$type = $this->determine_type( $args );
 		}
