@@ -21,16 +21,6 @@ abstract class EE_Site_Command {
 	private $fs;
 
 	/**
-	 * @var bool $wildcard Whether the site is letsencrypt type is wildcard or not.
-	 */
-	private $wildcard;
-
-	/**
-	 * @var bool $ssl Whether the site has SSL or not.
-	 */
-	private $ssl;
-
-	/**
 	 * @var string $le_mail Mail id to be used for letsencrypt registration and certificate generation.
 	 */
 	private $le_mail;
@@ -270,57 +260,137 @@ abstract class EE_Site_Command {
 		\EE\Utils\delem_log( 'site update start' );
 
 		$args             = auto_site_name( $args, 'site', __FUNCTION__ );
-		$this->site_data  = get_site_info( $args, false, true, false );
+		$this->site_data  = get_site_info( $args );
 
 		$type = \EE\Utils\get_flag_value( $assoc_args, 'type' );
 
-		$type_conversion_whitelist = [
-			'html' => [ 'php', 'wp' ],
-			'php'  => [ 'wp' ],
-		];
+		if ( $type ) {
 
-		if( ! array_key_exists( $this->site_data->site_type, $type_conversion_whitelist ) || ! in_array( $type, $type_conversion_whitelist[$this->site_data->site_type] ) ) {
-			\EE::error( "You can not update to $type from {$this->site_data->site_type}" );
-		}
+			$site_create_params = $this->get_site_create_params( $type );
 
-		$this->fs   = new Filesystem();
-		$backup_dir = dirname( $this->site_data->site_fs_path ) . '/.' . $this->site_data->site_fs_path . '.bak';
-		$db_dump_dir = dirname( $this->site_data->site_fs_path ) . '/.db_dump';
-		if( ! $this->fs->exists( $db_dump_dir ) ) {
-			$this->fs->mkdir( $db_dump_dir );
-		}
-		$creation_params = [];
+			\EE::runcommand( 'site backup ' . $this->site_data['site_url'] );
 
-		if( ! empty( $this->site_data->db_host ) ) {
-			$db_data = [
-				'db_host' => $this->site_data->db_host,
-				'db_user' => $this->site_data->db_user,
-				'db_name' => $this->site_data->db_name,
-				'db_password' => $this->site_data->db_password,
-			];
-		
-			\EE::log( 'Taking backup of database.' );
+			try {
+				\EE::runcommand( 'site delete ' . $this->site_data['site_url'], [ 'exit_error' => false ] );
+				$create = \EE::exec( sprintf( 'ee site create %s --type=%s %s', $this->site_data['site_url'], $type, $site_create_params ), true, true );
+				if ( ! $create ) {
+					throw new \Exception( 'Unable to create new site of type ' . $type );
+				}
+			} catch ( \Exception $e ) {
+				$old_site_create_params = $this->get_site_create_params( $this->site_data['site_type'] );
+				\EE::error( 'Encountered error while updating site: ' . $e->getMessage() . '. Restoring old site.', false );
+				\EE::runcommand( sprintf( 'site create %s --type=%s %s', $this->site_data['site_url'], $this->site_data['site_type'], $old_site_create_params ), [ 'exit_error' => false ] );
 
-			$img_versions = \EE\Utils\get_image_versions();
-			$network = ( GLOBAL_DB === $this->site_data->db_host ) ? "--network='" . GLOBAL_NETWORK . "'" : '';
-			if ( ! \EE::exec( sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysqldump --host='%s' --port='%s' --user='%s' --password='%s' %s > /db_dump/%s.db\"", $db_dump_dir, $network, $img_versions['easyengine/mariadb'], $this->site_data->db_host, $this->site_data->db_port, $this->site_data->db_user, $this->site_data->db_password, $this->site_data->db_name, $this->site_data->site_url ) ) ) {
-				\EE::error( 'Unable to create mysql dump. Aborting.' );
+				$img_versions       = \EE\Utils\get_image_versions();
+				$network            = '';
+				$backup_location    = EE_CONF_ROOT . '/site-backup/' . $this->site_data['site_url'] . '/db/';
+				$backup_db_location = EE_CONF_ROOT . '/site-backup/' . $this->site_data['site_url'] . '/db/';
+
+				if ( GLOBAL_DB === $this->site_data['db_host'] ) {
+					$network = "--network='" . GLOBAL_BACKEND_NETWORK . "'";
+				} elseif ( 'db' === $this->site_data['db_host'] ) {
+					$network = "--network='" . $this->site_data['site_url'] . "'";
+				}
+
+				if ( ! \EE::exec( sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysqlimport --host='%s' --port='%s' --user='%s' --password='%s' /db_dump/%s\"", $backup_db_location, $network, $img_versions['easyengine/mariadb'], $this->site_data['db_host'], $this->site_data['db_port'], $this->site_data['db_user'], $this->site_data['db_password'], $this->site_data['db_name'], $this->site_data['site_url'], $this->site_data['site_url'] ) ) ) {
+					\EE::error( 'Unable to create mysql dump. Aborting.' );
+				}
 			}
-			$creation_db_params[] = [
-				'dbname' => $this->site_data->db_name,
-				'dbuser' => $this->site_data->db_user,
-				'dbpass' => $this->site_data->db_password,
-				'dbhost' => $this->site_data->db_host,
-			];
-			array_merge($creation_params,$creation_db_params);
-		}
-		// $this->fs->rename( $this->site_data->site_fs_path, $backup_dir );
-
-		if( ! empty( $this->site_data->db_host ) && in_array( $this->site_data->db_host, [ 'db', GLOBAL_DB ] ) ) {
-				// Take mysqldump
 		}
 	}
 
+	/**
+	 * Returns site create params for a given site type
+	 *
+	 * @param string $type Type of site to create.
+	 *
+	 * @return mixed
+	 */
+	private function get_site_create_params( string $type ) {
+		if ( ! empty( $this->site_data['db_host'] ) ) {
+			$db_params = [
+				'dbname' => $this->site_data['db_name'],
+				'dbuser' => $this->site_data['db_user'],
+				'dbpass' => $this->site_data['db_password'],
+				'dbhost' => $this->site_data['db_host'],
+			];
+
+			if ( 'db' === $this->site_data['db_host'] ) {
+				$db_params['local-db'] = true;
+			}
+
+			if ( 'php' === $type ) {
+				$db_params['with-db'] = true;
+			}
+
+			return array_reduce( $db_params, function ( $carry, $key ) use ( $db_params ) {
+				return $carry . "--$key" . ( true !== $db_params[ $key ] ? '=' . $db_params[ $key ] : '' );
+			}, '' );
+		}
+	}
+
+	/**
+	 * Backup a site.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<site-name>]
+	 * : Name of website.
+	 *
+	 * [--location=<location>]
+	 * : Location to create backup to.
+	 *
+	 */
+	public function backup( $args, $assoc_args ) {
+		\EE\Utils\delem_log( 'site update start' );
+		$args             = auto_site_name( $args, 'site', __FUNCTION__ );
+		$this->site_data  = get_site_info( $args );
+
+		\EE::log( 'Taking backup of ' . $this->site_data['site_url'] );
+
+		$backup_location = \EE\Utils\get_flag_value( $assoc_args, 'location', EE_CONF_ROOT . '/site-backup/' );
+		$files_backup_location = $backup_location . '/files/';
+
+		$fs = new Filesystem();
+		$fs->mirror( $this->site_data['site_fs_path'], $files_backup_location );
+
+		if ( ! empty( $this->site_data['db_host'] ) ) {
+			\EE::log( 'Taking backup of database.' );
+			$db_backup_location = $backup_location . '/db/' ;
+			$fs->mkdir( $db_backup_location );
+
+			$img_versions = \EE\Utils\get_image_versions();
+			$network = '';
+
+			if ( GLOBAL_DB === $this->site_data['db_host'] ) {
+				$network = "--network='" . GLOBAL_BACKEND_NETWORK . "'";
+			} elseif ( 'db' === $this->site_data['db_host'] ) {
+				$network = "--network='" . $this->site_data['site_url'] . "'";
+			}
+
+			if ( ! \EE::exec( sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysqldump --host='%s' --port='%s' --user='%s' --password='%s' %s > /db_dump/%s.db\"", $db_backup_location, $network, $img_versions['easyengine/mariadb'], $this->site_data['db_host'], $this->site_data['db_port'], $this->site_data['db_user'], $this->site_data['db_password'], $this->site_data['db_name'], $this->site_data['site_url'] ) ) ) {
+				\EE::error( 'Unable to create mysql dump. Aborting.' );
+			}
+		}
+
+		\EE::success( 'Back up successfully completed. You can find your backup at ' . $backup_location );
+	}
+
+	/**
+	 * Restore a site.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [<site-name>]
+	 * : Name of website.
+	 *
+	 * [<location>]
+	 * : Location to backup.
+	 *
+	 */
+	private function restore( $args, $assoc_args ) {
+
+	}
 
 	/**
 	 * Enables a website. It will start the docker containers of the website if they are stopped.

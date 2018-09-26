@@ -64,15 +64,15 @@ class Site_Command {
 	 * Or finally the most basic site-type and the default included in this package, type=html.
 	 */
 	public function __invoke( $args, $assoc_args ) {
-		
+
 		$site_types = self::get_site_types();
 		$assoc_args = $this->convert_old_args_to_new_args( $args, $assoc_args );
 
 		if ( isset( $assoc_args['type'] ) ) {
 			$type = $assoc_args['type'];
-			if( ! ( ! empty( $args ) && 'update' == $args[0] ) ) {
+//			if( ! ( ! empty( $args ) && 'update' == $args[0] ) ) {
 				unset( $assoc_args['type'] );
-			}
+//			}
 		} else {
 			$type = $this->determine_type( $args );
 		}
@@ -152,7 +152,7 @@ class Site_Command {
 	 * @return array Updated $assoc_args.
 	 */
 	private function convert_old_args_to_new_args( $args, $assoc_args ) {
-		
+
 		$ee3_compat_array_map_to_type = [
 			'wp'          => [ 'type' => 'wp' ],
 			'wpsubdom'    => [ 'type' => 'wp', 'mu' => 'subdom' ],
