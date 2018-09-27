@@ -4,6 +4,10 @@ if ( ! defined( 'SITE_TEMPLATE_ROOT' ) ) {
 	define( 'SITE_TEMPLATE_ROOT', __DIR__ . '/templates' );
 }
 
+if ( ! defined( 'SITE_BACKUP_ROOT' ) ) {
+	define( 'SITE_BACKUP_ROOT', EE_CONF_ROOT . '/sites-backup' );
+}
+
 if ( ! defined( 'GLOBAL_DB' ) ) {
 	define( 'GLOBAL_DB', 'global-db' );
 }
