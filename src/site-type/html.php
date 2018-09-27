@@ -298,6 +298,22 @@ class HTML extends EE_Site_Command {
 	/**
 	 * @inheritdoc
 	 */
+	public function update( $args, $assoc_args ) {
+		$args            = \EE\Site\Utils\auto_site_name( $args, __FUNCTION__, 'site' );
+		$type            = \EE\Utils\get_flag_value( $assoc_args, 'type' );
+		$this->site_data = get_site_info( $args );
+
+		if ( $type && ! in_array( $this->site_data['site_type'], [ 'html', 'php', 'wp' ] ) ) {
+			\EE::error( 'No site can be updated to html' );
+		}
+
+		parent::update( $args, $assoc_args );
+	}
+
+
+	/**
+	 * @inheritdoc
+	 */
 	public function restart( $args, $assoc_args, $whitelisted_containers = [] ) {
 		$whitelisted_containers = [ 'nginx' ];
 		parent::restart( $args, $assoc_args, $whitelisted_containers );

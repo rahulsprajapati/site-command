@@ -252,6 +252,9 @@ abstract class EE_Site_Command {
 	 * [--type=<site-type>]
 	 * : Update to valid and supported site-type.
 	 *
+	 * [--ssl=<ssl-type>]
+	 * : Update non-ssl type to SSL.
+	 *
 	 * ## EXAMPLES
 	 *
 	 *     # Update a html site to WordPress.
@@ -334,9 +337,9 @@ abstract class EE_Site_Command {
 	 *
 	 * @return mixed
 	 */
-	private function get_site_create_params ( string $type ) {
+	private function get_site_create_params ( string $type, array $assoc_args ) {
 		if ( ! empty( $this->site_data['db_host'] ) ) {
-			$db_params = [
+			$site_create_params = [
 				'dbname' => $this->site_data['db_name'],
 				'dbuser' => $this->site_data['db_user'],
 				'dbpass' => $this->site_data['db_password'],
@@ -344,17 +347,20 @@ abstract class EE_Site_Command {
 			];
 
 			if ( 'db' === $this->site_data['db_host'] ) {
-				$db_params['local-db'] = true;
+				$site_create_params['local-db'] = true;
 			}
 
 			if ( 'php' === $type ) {
-				$db_params['with-db'] = true;
+				$site_create_params['with-db'] = true;
+			}
+			if ( ( 'php' === $type || 'wp' === $type ) && $this->site_data['cache_nginx_browser'] ) {
+				$site_create_params['cache'] = true;
 			}
 
-			$db_params_keys = array_keys( $db_params );
+			$site_create_params_keys = array_keys( $site_create_params );
 
-			return array_reduce( $db_params_keys, function ( $carry, $key ) use ( $db_params ) {
-				return $carry . " --$key" . ( true !== $db_params[ $key ] ? '=' . $db_params[ $key ] : '' );
+			return array_reduce( $site_create_params_keys, function ( $carry, $key ) use ( $site_create_params ) {
+				return $carry . " --$key" . ( true !== $site_create_params[ $key ] ? '=' . $site_create_params[ $key ] : '' );
 			}, '' );
 		}
 	}
