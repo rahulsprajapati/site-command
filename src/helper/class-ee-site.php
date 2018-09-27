@@ -262,28 +262,15 @@ abstract class EE_Site_Command {
 	 */
 	public function update( $args, $assoc_args ) {
 		\EE\Utils\delem_log( 'site update start' );
-
 		$args            = auto_site_name( $args, 'site', __FUNCTION__ );
 		$this->site_data = get_site_info( $args );
 
 		$type = \EE\Utils\get_flag_value( $assoc_args, 'type' );
 
 		if ( $type ) {
-
-			$site_create_params = $this->get_site_create_params( $type );
-
 			EE::runcommand( 'site backup ' . $this->site_data['site_url'] );
 
 			try {
-				EE::log( 'Removing old site' );
-				EE::exec( 'ee site delete --yes ' . $this->site_data['site_url'] );
-
-				EE::log( 'Creating new site of type ' . $type );
-				$create = \EE::exec( sprintf( 'ee site create %s --type=%s %s', $this->site_data['site_url'], $type, $site_create_params ) );
-
-				if ( ! $create ) {
-					throw new \Exception( 'Unable to create new site of type ' . $type . '. Please check logs for more info' );
-				}
 			} catch ( \Exception $e ) {
 				$old_site_create_params = $this->get_site_create_params( $this->site_data['site_type'] );
 				EE::error( 'Encountered error while updating site: ' . $e->getMessage() . "\n" . 'Restoring old site.', false );
@@ -379,7 +366,7 @@ abstract class EE_Site_Command {
 	 * [--force]
 	 * : Force backup even if nginx config is incorrect
 	 */
-	public function backup ( $args, $assoc_args ) {
+	public function backup( $args, $assoc_args ) {
 		\EE\Utils\delem_log( 'site update start' );
 		$args            = auto_site_name( $args, 'site', __FUNCTION__ );
 		$this->site_data = get_site_info( $args );
@@ -394,14 +381,14 @@ abstract class EE_Site_Command {
 
 		$backup_location       = \EE\Utils\get_flag_value( $assoc_args, 'location', SITE_BACKUP_ROOT . '/' . $this->site_data['site_url'] );
 		$files_backup_location = $backup_location . '/files/';
-		$conf_backup_location  = $backup_location . '/conf/';
+		$conf_backup_location  = $backup_location . '/config/';
+		$logs_backup_location  = $backup_location . '/logs/';
 
 		$this->fs->mirror( $this->site_data['site_fs_path'] . '/app/src/', $files_backup_location );
-		$this->fs->mirror( $this->site_data['site_fs_path'] . '/config/nginx/custom', $conf_backup_location . '/nginx/custom' );
-
-		if ( 'php' === $this->site_data['site_type'] || 'wp' === $this->site_data['site_type'] ) {
-			$this->fs->copy( $this->site_data['site_fs_path'] . '/config/php-fpm/php.ini', $conf_backup_location . '/php-fpm/php.ini' );
-		}
+		$this->fs->mirror( $this->site_data['site_fs_path'] . '/config', $conf_backup_location );
+		$this->fs->mirror( $this->site_data['site_fs_path'] . '/logs', $logs_backup_location );
+		$this->fs->copy( $this->site_data['site_fs_path'] . '/docker-compose.yml', $backup_location . '/docker-compose.yml' );
+		$this->fs->copy( $this->site_data['site_fs_path'] . '/.env', $backup_location . '/.env' );
 
 		if ( ! empty( $this->site_data['db_host'] ) ) {
 			// Backup DB
