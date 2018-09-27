@@ -38,6 +38,8 @@ abstract class EE_Site_Command {
 		pcntl_signal( SIGINT, [ $this, 'rollback' ] );
 		$shutdown_handler = new Shutdown_Handler();
 		register_shutdown_function( [ $shutdown_handler, 'cleanup' ], [ &$this ] );
+
+		$this->fs = new Filesystem();
 	}
 
 	/**
@@ -277,7 +279,7 @@ abstract class EE_Site_Command {
 				$create = \EE::exec( sprintf( 'ee site create %s --type=%s %s', $this->site_data['site_url'], $type, $site_create_params ) );
 
 				if ( ! $create ) {
-					throw new \Exception( 'Unable to create new site of type ' . $type );
+					throw new \Exception( 'Unable to create new site of type ' . $type . '. Please check logs for more info' );
 				}
 			} catch ( \Exception $e ) {
 				$old_site_create_params = $this->get_site_create_params( $this->site_data['site_type'] );
@@ -286,7 +288,7 @@ abstract class EE_Site_Command {
 
 				$img_versions       = \EE\Utils\get_image_versions();
 				$network            = '';
-				$backup_db_location = EE_CONF_ROOT . '/sites-backup/' . $this->site_data['site_url'] . '/db/';
+				$backup_db_location = SITE_BACKUP_ROOT . '/' . $this->site_data['site_url'] . '/db';
 
 				if ( GLOBAL_DB === $this->site_data['db_host'] ) {
 					$network = "--network='" . GLOBAL_BACKEND_NETWORK . "'";
@@ -304,6 +306,22 @@ abstract class EE_Site_Command {
 				EE::log( 'Site restored successfully' );
 				return;
 			}
+
+			/**
+			 * Backup existing configuration before restoring user configuration.
+			 * If new config causes error in `nginx -t`, then user's custom config will be removed.
+			 */
+			$config_backup_path = '/tmp/' . EE\Utils\random_password( 7 ) ;
+			$this->fs->mirror($this->site_data['site_url'] . '/config', $config_backup_path );
+			$this->fs->mirror( SITE_BACKUP_ROOT . '/' . $this->site_data['site_url'] . '/config', $this->site_data['site_fs_path'] . '/config', null, [ 'override' => true ] );
+
+			chdir( $this->site_data['site_fs_path'] );
+
+			if ( ! EE::exec( 'docker-compose exec nginx nginx -t' ) ) {
+				EE::warning( 'Looks like your custom config causes Nginx config error. Currently it will be removed. You can manually add it after correcting it from backup.' );
+				$this->fs->mirror( $config_backup_path , $this->site_data['site_url'] . '/config', null, [ 'override' => true ] );
+			}
+
 		}
 
 		EE::success( 'Site updated successfully' );
@@ -352,30 +370,38 @@ abstract class EE_Site_Command {
 	 * [--location=<location>]
 	 * : Location to create backup to.
 	 *
+	 * [--force]
+	 * : Force backup even if nginx config is incorrect
 	 */
 	public function backup ( $args, $assoc_args ) {
 		\EE\Utils\delem_log( 'site update start' );
 		$args            = auto_site_name( $args, 'site', __FUNCTION__ );
 		$this->site_data = get_site_info( $args );
 
-		\EE::log( 'Taking backup of ' . $this->site_data['site_url'] );
+		chdir( $this->site_data['site_fs_path'] );
 
-		$backup_location       = \EE\Utils\get_flag_value( $assoc_args, 'location', EE_CONF_ROOT . '/sites-backup/' . $this->site_data['site_url'] );
+		if ( ! EE::exec( 'docker-compose exec nginx nginx -t' ) ) {
+			EE::error( 'Looks like there is some error in your nginx config. Please fix it to continue backup.' );
+		}
+
+		EE::log( 'Taking backup of ' . $this->site_data['site_url'] );
+
+		$backup_location       = \EE\Utils\get_flag_value( $assoc_args, 'location', SITE_BACKUP_ROOT . '/' . $this->site_data['site_url'] );
 		$files_backup_location = $backup_location . '/files/';
 		$conf_backup_location  = $backup_location . '/conf/';
 
-		$fs = new Filesystem();
-		$fs->mirror( $this->site_data['site_fs_path'] . '/app/src/', $files_backup_location );
-		$fs->copy( $this->site_data['site_fs_path'] . '/config/nginx/custom/user.conf', $conf_backup_location . '/nginx/custom/user.conf' );
+		$this->fs->mirror( $this->site_data['site_fs_path'] . '/app/src/', $files_backup_location );
+		$this->fs->mirror( $this->site_data['site_fs_path'] . '/config/nginx/custom', $conf_backup_location . '/nginx/custom' );
 
-		if ( 'php' === $this->site_data['site_type'] ) {
-			$fs->copy( $this->site_data['site_fs_path'] . '/config/php-fpm/php.ini', $conf_backup_location . '/php-fpm/php.ini' );
+		if ( 'php' === $this->site_data['site_type'] || 'wp' === $this->site_data['site_type'] ) {
+			$this->fs->copy( $this->site_data['site_fs_path'] . '/config/php-fpm/php.ini', $conf_backup_location . '/php-fpm/php.ini' );
 		}
 
 		if ( ! empty( $this->site_data['db_host'] ) ) {
-			\EE::log( 'Taking backup of database.' );
+			// Backup DB
+			EE::log( 'Taking backup of database.' );
 			$db_backup_location = $backup_location . '/db/';
-			$fs->mkdir( $db_backup_location );
+			$this->fs->mkdir( $db_backup_location );
 
 			$img_versions = \EE\Utils\get_image_versions();
 			$network      = '';
@@ -388,28 +414,12 @@ abstract class EE_Site_Command {
 
 			$dump_command = sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysqldump --host='%s' --port='%s' --user='%s' --password='%s' %s > /db_dump/%s.sql\"", $db_backup_location, $network, $img_versions['easyengine/mariadb'], $this->site_data['db_host'], $this->site_data['db_port'], $this->site_data['db_user'], $this->site_data['db_password'], $this->site_data['db_name'], $this->site_data['site_url'] );
 
-			if ( ! \EE::exec( $dump_command ) ) {
-				\EE::error( 'Unable to create mysql dump. Aborting.' );
+			if ( ! EE::exec( $dump_command ) ) {
+				EE::error( 'Unable to create mysql dump. Aborting.' );
 			}
 		}
 
-		\EE::success( 'Back up successfully completed. You can find your backup at ' . $backup_location );
-	}
-
-	/**
-	 * Restore a site.
-	 *
-	 * ## OPTIONS
-	 *
-	 * [<site-name>]
-	 * : Name of website.
-	 *
-	 * [<location>]
-	 * : Location to backup.
-	 *
-	 */
-	private function restore( $args, $assoc_args ) {
-
+		EE::success( 'Backup completed successfully. You can find your backup at ' . $backup_location );
 	}
 
 	/**
