@@ -168,15 +168,11 @@ function generate_global_docker_compose_yml( Filesystem $fs ) {
  *
  * @return array Finally created database name, user and password.
  */
-function create_user_in_db( $db_host, $db_name = '', $db_user = '', $db_pass = '', $db_user_suffix = '', $db_name_suffix = '' ) {
+function create_user_in_db( $db_host, $db_name = '', $db_user = '', $db_pass = '' ) {
 
-	$db_name_suffix = empty( $db_name_suffix ) ? \EE\Utils\random_password( 5 ) : $db_name_suffix;
 	$db_name        = empty( $db_name ) ? \EE\Utils\random_password( 5 ) : $db_name;
-	$db_user_suffix = empty( $db_user_suffix ) ? \EE\Utils\random_password( 5 ) : $db_user_suffix;
 	$db_user        = empty( $db_user ) ? \EE\Utils\random_password( 5 ) : $db_user;
 	$db_pass        = empty( $db_pass ) ? \EE\Utils\random_password() : $db_pass;
-	$db_user        = $db_user . '_' . $db_user_suffix;
-	$db_name        = $db_name . '_' . $db_name_suffix;
 
 	$create_string = sprintf( "CREATE USER '%1\$s'@'%%' IDENTIFIED BY '%2\$s'; CREATE DATABASE %3\$s; GRANT ALL PRIVILEGES ON %3\$s.* TO '%1\$s'@'%%'; FLUSH PRIVILEGES;", $db_user, $db_pass, $db_name );
 

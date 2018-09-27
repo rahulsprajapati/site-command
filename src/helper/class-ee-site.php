@@ -255,7 +255,7 @@ abstract class EE_Site_Command {
 	 *     # Update a html site to WordPress.
 	 *     $ ee site update example.com --type=wp
 	 */
-	public function update ( $args, $assoc_args ) {
+	public function update( $args, $assoc_args ) {
 		\EE\Utils\delem_log( 'site update start' );
 
 		$args            = auto_site_name( $args, 'site', __FUNCTION__ );
@@ -281,12 +281,12 @@ abstract class EE_Site_Command {
 				}
 			} catch ( \Exception $e ) {
 				$old_site_create_params = $this->get_site_create_params( $this->site_data['site_type'] );
-				EE::error( 'Encountered error while updating site: ' . $e->getMessage() . '. Restoring old site.', false );
+				EE::error( 'Encountered error while updating site: ' . $e->getMessage() . "\n" . 'Restoring old site.', false );
 				EE::exec( sprintf( 'ee site create %s --type=%s %s', $this->site_data['site_url'], $this->site_data['site_type'], $old_site_create_params ) );
 
 				$img_versions       = \EE\Utils\get_image_versions();
 				$network            = '';
-				$backup_db_location = EE_CONF_ROOT . '/site-backup/' . $this->site_data['site_url'] . '/db/';
+				$backup_db_location = EE_CONF_ROOT . '/sites-backup/' . $this->site_data['site_url'] . '/db/';
 
 				if ( GLOBAL_DB === $this->site_data['db_host'] ) {
 					$network = "--network='" . GLOBAL_BACKEND_NETWORK . "'";
@@ -294,11 +294,15 @@ abstract class EE_Site_Command {
 					$network = "--network='" . $this->site_data['site_url'] . "'";
 				}
 
-				$import_command = sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysqlimport --host='%s' --port='%s' --user='%s' --password='%s' %s /db_dump/%s.sql\"", $backup_db_location, $network, $img_versions['easyengine/mariadb'], $this->site_data['db_host'], $this->site_data['db_port'], $this->site_data['db_user'], $this->site_data['db_password'], $this->site_data['db_name'], $this->site_data['site_url'], $this->site_data['site_url'] ) ;
+				$import_command = sprintf( "docker run -it -v %s:/db_dump --rm %s easyengine/mariadb:%s sh -c \"mysql --host='%s' --port='%s' --user='%s' --password='%s' --database='%s' < /db_dump/%s.sql\"", $backup_db_location, $network, $img_versions['easyengine/mariadb'], $this->site_data['db_host'], $this->site_data['db_port'], $this->site_data['db_user'], $this->site_data['db_password'], $this->site_data['db_name'], $this->site_data['site_url'], $this->site_data['site_url'] );
+
+				EE::log( 'Restoring database' );
 
 				if ( ! EE::exec( $import_command ) ) {
 					EE::error( 'Unable to import from mysql dump. Aborting.' );
 				}
+				EE::log( 'Site restored successfully' );
+				return;
 			}
 		}
 
