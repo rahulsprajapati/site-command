@@ -30,6 +30,14 @@ abstract class EE_Site_Command {
 	 */
 	private $site_data;
 
+	/**
+	 * @var array $update_types_supported site types which support update to current site type.
+	 */
+	protected static $update_types_supported = [
+		'html',
+		'php',
+	];
+
 	public function __construct() {
 
 		pcntl_signal( SIGTERM, [ $this, 'rollback' ] );
@@ -40,6 +48,16 @@ abstract class EE_Site_Command {
 		register_shutdown_function( [ $shutdown_handler, 'cleanup' ], [ &$this ] );
 
 		$this->fs = new Filesystem();
+	}
+
+	/**
+	 * @param string $type
+	 */
+	public static function add_supported_update_type( string $type ) {
+
+		if ( ! in_array( $type, static::$update_types_supported ) ) {
+			static::$update_types_supported[] = $type;
+		}
 	}
 
 	/**
@@ -272,10 +290,6 @@ abstract class EE_Site_Command {
 
 			try {
 			} catch ( \Exception $e ) {
-				$old_site_create_params = $this->get_site_create_params( $this->site_data['site_type'] );
-				EE::error( 'Encountered error while updating site: ' . $e->getMessage() . "\n" . 'Restoring old site.', false );
-				EE::exec( sprintf( 'ee site create %s --type=%s %s', $this->site_data['site_url'], $this->site_data['site_type'], $old_site_create_params ) );
-
 				$img_versions       = \EE\Utils\get_image_versions();
 				$network            = '';
 				$backup_db_location = SITE_BACKUP_ROOT . '/' . $this->site_data['site_url'] . '/db';
@@ -318,39 +332,21 @@ abstract class EE_Site_Command {
 	}
 
 	/**
-	 * Returns site create params for a given site type
+	 * Restores config of site
 	 *
-	 * @param string $type Type of site to create.
-	 *
-	 * @return mixed
+	 * @param string $backup_path  Path to site backup
+	 * @param string $site_fs_path Path to site
+	 * @param string $site_type    Path to site
 	 */
-	private function get_site_create_params ( string $type, array $assoc_args ) {
-		if ( ! empty( $this->site_data['db_host'] ) ) {
-			$site_create_params = [
-				'dbname' => $this->site_data['db_name'],
-				'dbuser' => $this->site_data['db_user'],
-				'dbpass' => $this->site_data['db_password'],
-				'dbhost' => $this->site_data['db_host'],
-			];
+	protected function restore_site_config( string $backup_path, string $site_fs_path, string $site_type ) {
 
-			if ( 'db' === $this->site_data['db_host'] ) {
-				$site_create_params['local-db'] = true;
-			}
+		$this->fs->mirror( $backup_path . '/config/nginx/custom', $site_fs_path . '/config/nginx/custom', null, [ 'override' => true] );
 
-			if ( 'php' === $type ) {
-				$site_create_params['with-db'] = true;
-			}
-			if ( ( 'php' === $type || 'wp' === $type ) && $this->site_data['cache_nginx_browser'] ) {
-				$site_create_params['cache'] = true;
-			}
-
-			$site_create_params_keys = array_keys( $site_create_params );
-
-			return array_reduce( $site_create_params_keys, function ( $carry, $key ) use ( $site_create_params ) {
-				return $carry . " --$key" . ( true !== $site_create_params[ $key ] ? '=' . $site_create_params[ $key ] : '' );
-			}, '' );
+		if ( 'php' === $site_type || 'wp' === $site_type ) {
+			$this->fs->copy( $backup_path . '/config/php/php.ini', $site_fs_path . '/config/php/php.ini', null, [ 'override' => true] );
 		}
 	}
+
 
 	/**
 	 * Backup a site.
@@ -366,16 +362,10 @@ abstract class EE_Site_Command {
 	 * [--force]
 	 * : Force backup even if nginx config is incorrect
 	 */
-	public function backup( $args, $assoc_args ) {
-		\EE\Utils\delem_log( 'site update start' );
+	protected function backup( $args, $assoc_args ) {
+		\EE\Utils\delem_log( 'site backup start' );
 		$args            = auto_site_name( $args, 'site', __FUNCTION__ );
-		$this->site_data = get_site_info( $args );
-
-		chdir( $this->site_data['site_fs_path'] );
-
-		if ( ! EE::exec( 'docker-compose exec nginx nginx -t' ) ) {
-			EE::error( 'Looks like there is some error in your nginx config. Please fix it to continue backup.' );
-		}
+		$this->site_data = get_site_info( $args, false );
 
 		EE::log( 'Taking backup of ' . $this->site_data['site_url'] );
 
